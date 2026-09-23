@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RuediWay</title>
+<style>
+body{font:18px system-ui;margin:0;background:#f4f5f1;color:#202d28}main{max-width:560px;margin:40px auto;padding:24px}h1{font-size:36px}label{display:block;margin:24px 0 8px}input,button{box-sizing:border-box;width:100%;padding:14px;font:inherit}button{margin-top:24px;background:#226447;color:white;border:0;border-radius:8px}button:disabled{opacity:.5}.secondary{background:transparent;color:#226447;border:1px solid #226447}pre{white-space:pre-wrap;font:inherit;line-height:1.6}small{display:block;line-height:1.5}[hidden]{display:none!important}
+</style>
+<main>
+<h1>RuediWay</h1><p>Foto aufnehmen. Frage erkennen. Antwort erhalten.</p>
+<section id="pairing">
+<p>Erzeuge am PC unter <strong>127.0.0.1:8000/host</strong> einen Code und gib ihn hier ein.</p>
+<form id="pair-form">
+<label for="code">Code vom PC</label><input id="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
+<button id="pair-button">Verbinden</button>
+</form>
+</section>
+<section id="analysis" hidden>
+<p>Handy verbunden.</p>
+<form id="photo-form">
+<label for="photo">Dein Foto</label><input id="photo" type="file" accept="image/*" capture="environment" required>
+<button id="submit">Analysieren</button>
+</form>
+<button id="disconnect" class="secondary" type="button">Verbindung trennen</button>
+</section>
+<p role="status" id="status"></p><pre id="answer" aria-live="polite"></pre>
+<small>Die KI-Auswertung erfolgt über Codex. Fotos werden nach der Anfrage auf diesem Server gelöscht.</small>
+</main>
+<script>
+const key='ruediway-session',pairing=document.querySelector('#pairing'),analysis=document.querySelector('#analysis'),status=document.querySelector('#status'),answer=document.querySelector('#answer');let heartbeat,socket,reconnectTimer;
+function openPresence(){
+const token=sessionStorage.getItem(key);if(!token||socket)return;
+const scheme=location.protocol==='https:'?'wss':'ws';const live=socket=new WebSocket(`${scheme}://${location.host}/session/live`);
+live.addEventListener('open',()=>live.send(token));
+live.addEventListener('close',()=>{if(socket===live)socket=null;if(sessionStorage.getItem(key)&&!socket)reconnectTimer=setTimeout(()=>{reconnectTimer=null;openPresence();},2000);});
+}
+function connected(value){pairing.hidden=value;analysis.hidden=!value;clearInterval(heartbeat);clearTimeout(reconnectTimer);if(value){openPresence();heartbeat=setInterval(ping,4000);}else if(socket){socket.close();socket=null;}}
+function forget(message){sessionStorage.removeItem(key);connected(false);answer.textContent='';status.textContent=message;}
+async function read(response){const result=await response.json();if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'Die Anfrage konnte nicht verarbeitet werden.');return result;}
+async function ping(){const token=sessionStorage.getItem(key);if(!token)return;if(socket?.readyState===WebSocket.OPEN)socket.send('ping');try{const response=await fetch('/session',{headers:{'X-RuediWay-Token':token},cache:'no-store'});if(response.status===401)forget('Verbindung abgelaufen. Bitte neu koppeln.');}catch{}}
+async function checkSession(){const token=sessionStorage.getItem(key);if(!token)return;try{await read(await fetch('/session',{headers:{'X-RuediWay-Token':token},cache:'no-store'}));connected(true);}catch{forget('Verbindung abgelaufen. Bitte neu koppeln.');}}
+document.querySelector('#pair-form').addEventListener('submit',async event=>{
+event.preventDefault();const button=document.querySelector('#pair-button');button.disabled=true;status.textContent='Verbindung wird hergestellt …';
+try{const code=document.querySelector('#code').value.trim();const result=await read(await fetch('/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})}));sessionStorage.setItem(key,result.token);document.querySelector('#code').value='';connected(true);status.textContent='Verbunden. Foto auswählen.';}
+catch(error){status.textContent=error.message;}finally{button.disabled=false;}
+});
+document.querySelector('#photo-form').addEventListener('submit',async event=>{
+event.preventDefault();const file=document.querySelector('#photo').files[0];if(!file)return;
+if(file.size>10*1024*1024){status.textContent='Bitte ein Foto unter 10 MB wählen.';return;}
+const button=document.querySelector('#submit');button.disabled=true;answer.textContent='';status.textContent='Bild wird analysiert …';
+try{const body=new FormData();body.append('image',file);const response=await fetch('/analyze',{method:'POST',body,headers:{'X-RuediWay-Token':sessionStorage.getItem(key)||''}});if(response.status===401){forget('Verbindung abgelaufen. Bitte neu koppeln.');return;}const result=await read(response);answer.textContent=result.answer;status.textContent='Fertig.';}
+catch(error){status.textContent=error.message;}finally{button.disabled=false;}
+});
+document.querySelector('#disconnect').addEventListener('click',async()=>{
+const token=sessionStorage.getItem(key);if(token){try{await fetch('/session',{method:'DELETE',headers:{'X-RuediWay-Token':token}});}catch{}}
+forget('Verbindung getrennt.');
+});
+function announceAway(){const token=sessionStorage.getItem(key);if(!token)return;const body=new Blob([JSON.stringify({token})],{type:'application/json'});if(!navigator.sendBeacon||!navigator.sendBeacon('/session/away',body))fetch('/session/presence',{method:'DELETE',headers:{'X-RuediWay-Token':token},keepalive:true}).catch(()=>{});}
+checkSession();
+window.addEventListener('pagehide',announceAway);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)announceAway();else ping();});
+window.addEventListener('pageshow',()=>{if(sessionStorage.getItem(key))ping();});
+window.addEventListener('online',openPresence);
+</script>
+</html>

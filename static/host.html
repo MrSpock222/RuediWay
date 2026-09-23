@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RuediWay · PC</title>
+<style>
+body{font:18px system-ui;margin:0;background:#f4f5f1;color:#202d28}main{max-width:560px;margin:40px auto;padding:24px}h1{font-size:36px}button{width:100%;padding:14px;margin:20px 0;background:#226447;color:white;border:0;border-radius:8px;font:inherit}.code{font-size:clamp(44px,10vw,70px);font-weight:750;letter-spacing:.12em;word-break:break-all}.connection{padding:14px;border-radius:8px;background:#e1e7e2}.connection.online{background:#d5efe0;color:#155c39}small{line-height:1.5}
+</style>
+<main>
+<h1>RuediWay am PC</h1>
+<p>Erzeuge einen Code und gib ihn am Handy oder auf der Uhr ein. Für jedes Gerät brauchst du einen eigenen Code. Alle Geräte müssen den PC erreichen können.</p>
+<p class="connection" id="connection" role="status">Verbindung wird geprüft …</p>
+<button id="generate">Code erzeugen</button>
+<p class="code" id="code" aria-live="polite"></p>
+<p id="status" role="status"></p>
+<small>Der Code gilt fünf Minuten und nur für eine Kopplung. Ein neuer Code ersetzt den alten. Beim Schließen des Handy-Browsers wechselt die Anzeige direkt, bei einer unterbrochenen Netzwerkverbindung spätestens nach 15 Sekunden auf „getrennt“. Die Uhr wird als verbunden angezeigt, solange ihre App geöffnet ist. Die Kopplung bleibt bis zu 24 Stunden gültig.</small>
+</main>
+<script>
+const button=document.querySelector('#generate'),code=document.querySelector('#code'),status=document.querySelector('#status'),connection=document.querySelector('#connection');let timer;
+async function refreshConnection(){
+try{const response=await fetch('/host/status',{cache:'no-store'});if(!response.ok)throw new Error();const state=await response.json();connection.classList.toggle('online',state.connected);connection.textContent=state.connected?(state.devices===1?'1 Gerät verbunden':`${state.devices} Geräte verbunden`):'Kein Gerät verbunden';if(!state.code_active&&code.textContent){code.textContent='';clearInterval(timer);status.textContent='Code verwendet oder abgelaufen. Bei Bedarf neuen Code erzeugen.';}}
+catch{connection.classList.remove('online');connection.textContent='Verbindungsstatus derzeit nicht verfügbar.';}
+}
+button.addEventListener('click',async()=>{
+button.disabled=true;clearInterval(timer);code.textContent='';status.textContent='Code wird erzeugt …';
+try{const response=await fetch('/host/code',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',cache:'no-store'});const result=await response.json();if(!response.ok)throw new Error(result.detail||'Fehler beim Erzeugen.');code.textContent=result.code;let remaining=result.expires_in;const tick=()=>{status.textContent=remaining>0?`Noch ${Math.ceil(remaining/60)} Minute(n) gültig.`:'Code abgelaufen. Neuen Code erzeugen.';if(remaining<=0){code.textContent='';clearInterval(timer);}remaining--;};tick();timer=setInterval(tick,1000);}
+catch(error){status.textContent=error.message;}finally{button.disabled=false;}
+});
+refreshConnection();setInterval(refreshConnection,1000);
+window.addEventListener('focus',refreshConnection);
+window.addEventListener('pageshow',refreshConnection);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshConnection();});
+</script>
+</html>

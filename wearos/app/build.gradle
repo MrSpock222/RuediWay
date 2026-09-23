@@ -1,0 +1,21 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'at.ruediway.wear'
+    compileSdk 37
+
+    defaultConfig {
+        applicationId 'at.ruediway.wear'
+        minSdk 30
+        targetSdk 36
+        versionCode 3
+        versionName '1.2'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
