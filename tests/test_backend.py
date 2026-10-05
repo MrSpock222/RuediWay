@@ -3,10 +3,24 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from app.backend import analyze_image
+from app.backend import analyze_image, analyze_images
 
 
 class BackendTests(unittest.TestCase):
+    def test_scan_attaches_both_views_in_order_in_one_request(self):
+        with tempfile.TemporaryDirectory() as folder:
+            images = [Path(folder) / 'page.png', Path(folder) / 'document.png']
+            output = Path(folder) / 'answer.txt'
+            output.write_text('1. Antwort', encoding='utf-8')
+            with patch('app.backend.subprocess.run', return_value=subprocess.CompletedProcess([], 0)) as run:
+                self.assertEqual(analyze_images(images, 'One page, two views', output), '1. Antwort')
+                command = run.call_args.args[0]
+                attached = [command[i+1] for i, flag in enumerate(command) if flag == '--image']
+                self.assertEqual(attached, list(map(str, images)))
+                self.assertEqual(command[-1], '-')
+                self.assertEqual(run.call_args.kwargs['cwd'], images[0].parent)
+                self.assertNotIn('shell', run.call_args.kwargs)
+
     def test_returns_only_final_answer_and_attaches_image(self):
         with tempfile.TemporaryDirectory() as folder:
             image = Path(folder) / "photo.jpg"

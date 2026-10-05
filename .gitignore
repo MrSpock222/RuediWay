@@ -5,3 +5,8 @@ __pycache__/
 captures/*
 !captures/.gitkeep
 .pytest_cache/
+scans/
+scan-validation/
+
+esp32/build/
+esp32/.local/

@@ -45,6 +45,8 @@ public final class MainActivity extends Activity {
     private boolean visible;
     private boolean requestRunning;
     private boolean disconnecting;
+    private boolean captureSubmitting;
+    private Button captureButton;
     private int shownVersion = -1;
 
     @Override
@@ -130,6 +132,8 @@ public final class MainActivity extends Activity {
 
     private void showAnswerControls() {
         status.setText("Verbinde …");
+        captureButton = button("Foto aufnehmen", this::capturePhoto);
+        captureButton.setEnabled(false);
         answer = label("Noch keine Antwort.", 17, FOREGROUND);
         button("Jetzt aktualisieren", this::loadResult);
         button("Antwort löschen", this::clearAnswer);
@@ -186,13 +190,40 @@ public final class MainActivity extends Activity {
         return view;
     }
 
-    private void button(String text, Runnable action) {
+    private Button button(String text, Runnable action) {
         Button button = new Button(this);
         button.setText(text);
         button.setTextColor(FOREGROUND);
         button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(ACCENT));
         content.addView(button, fullWidth());
         button.setOnClickListener(view -> action.run());
+        return button;
+    }
+
+    private void capturePhoto() {
+        if (!visible || disconnecting || captureSubmitting || !hasSession()) return;
+        captureSubmitting = true;
+        captureButton.setEnabled(false);
+        status.setText("Aufnahme wird angefordert …");
+        String base = preferences.getString("server", "");
+        String token = preferences.getString("token", "");
+        network.execute(() -> {
+            String feedback;
+            try {
+                request(base, "/capture", "POST", token, new JSONObject());
+                feedback = "Foto angefordert. Antwort folgt automatisch.";
+            } catch (Exception error) {
+                feedback = message(error);
+            }
+            String result = feedback;
+            handler.post(() -> {
+                captureSubmitting = false;
+                if (!visible || disconnecting || !token.equals(preferences.getString("token", ""))) return;
+                status.setText(result);
+                handler.removeCallbacks(refresh);
+                handler.postDelayed(refresh, 1500);
+            });
+        });
     }
 
     private LinearLayout.LayoutParams fullWidth() {
@@ -262,13 +293,18 @@ public final class MainActivity extends Activity {
                         answer.setText(cleared ? "Antwort gelöscht. Die nächste Analyse erscheint automatisch."
                                 : value.isEmpty() || "null".equals(value) ? "Noch keine Antwort." : value);
                     }
-                    status.setText("Verbunden · neue Antworten erscheinen automatisch");
+                    JSONObject camera = result.optJSONObject("camera");
+                    boolean online = camera != null && camera.optBoolean("online");
+                    captureButton.setEnabled(online && !camera.optBoolean("busy") && !captureSubmitting);
+                    if (!captureSubmitting) status.setText(online ? camera.optString("message", "Kamera bereit.")
+                            : "PC verbunden · Kamera getrennt");
                     handler.postDelayed(refresh, REFRESH_MS);
                 });
             } catch (Exception error) {
                 handler.post(() -> {
                     requestRunning = false;
                     if (!visible || disconnecting || status == null) return;
+                    if (captureButton != null) captureButton.setEnabled(false);
                     status.setText(message(error));
                     handler.postDelayed(refresh, REFRESH_MS);
                 });

@@ -17,3 +17,7 @@ Die Uhr speichert Serveradresse und Sitzung lokal. Eine Kopplung gilt höchstens
 Die App nutzt direkte HTTP-Anfragen an den PC (`/pair` und `/watch/result`). Der Server speichert nur die letzte erfolgreiche Antwort im Arbeitsspeicher; nach einem Neustart ist sie weg. Die Uhr erhält weder Kamerabilder noch alte Antworten als Verlauf. Es gibt keine Hintergrundbenachrichtigungen: Neue Antworten erscheinen, wenn die App geöffnet ist. HTTP im lokalen Netz ist unverschlüsselt; nur in einem vertrauenswürdigen privaten Netzwerk verwenden.
 
 Das Projekt verwendet Java ohne zusätzliche Laufzeitbibliotheken, Android Gradle Plugin 9.4.0, Gradle 9.6.0 und API 37. Android Studio kann fehlende SDK- oder Gradle-Komponenten beim ersten Öffnen installieren.
+
+## Kamera-Auslöser ab Version 1.3
+
+Bei geöffnetem Ergebnisbildschirm kann **Foto aufnehmen** die gekoppelte Raspberry-Pi-Kamera auslösen. Der Button ist nur verfügbar, wenn die Kamera verbunden ist und kein Kameraauftrag läuft. Fortschritt und Antwort erscheinen automatisch. Die Kamera muss vorher separat mit dem PC gekoppelt werden; siehe [Pi-Anleitung](../raspberrypi/README.md).

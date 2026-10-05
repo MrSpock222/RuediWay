@@ -6,20 +6,70 @@
 <style>
 body{font:18px system-ui;margin:0;background:#f4f5f1;color:#202d28}main{max-width:560px;margin:40px auto;padding:24px}h1{font-size:36px}button{width:100%;padding:14px;margin:20px 0;background:#226447;color:white;border:0;border-radius:8px;font:inherit}.code{font-size:clamp(44px,10vw,70px);font-weight:750;letter-spacing:.12em;word-break:break-all}.connection{padding:14px;border-radius:8px;background:#e1e7e2}.connection.online{background:#d5efe0;color:#155c39}small{line-height:1.5}
 </style>
+<style>
+select,input,button{box-sizing:border-box}select{width:100%;padding:10px;font:inherit;background:white;border:1px solid #a3b7aa;border-radius:8px}label{display:block;margin:12px 0 6px}input[type=range]{width:100%}button:disabled{opacity:.5;cursor:wait}.settings{padding:18px;background:#e1e7e2;border-radius:10px}.settings button{margin:14px 0 0}.notice{color:#754415}figure{margin:16px 0}figure img{display:block;width:100%;border-radius:8px}#liveToggle{background:#374e43}
+</style>
 <main>
 <h1>RuediWay am PC</h1>
+<p><a href="/host/scanner" style="color:#226447;font-weight:700">Seitenscanner öffnen →</a><br><small>Seite überlappend erfassen und anschließend auf Wunsch die Aufgaben beantworten lassen.</small></p>
 <p>Erzeuge einen Code und gib ihn am Handy oder auf der Uhr ein. Für jedes Gerät brauchst du einen eigenen Code. Alle Geräte müssen den PC erreichen können.</p>
 <p class="connection" id="connection" role="status">Verbindung wird geprüft …</p>
 <button id="generate">Code erzeugen</button>
 <p class="code" id="code" aria-live="polite"></p>
 <p id="status" role="status"></p>
+<h2 id="cameraName">Kamera</h2>
+<p id="cameraStatus" role="status">Kameraverbindung wird geprüft …</p>
+<div class="settings">
+<label for="imageMode">Bildmodus</label>
+<select id="imageMode"><option value="normal">Farbe / Original</option><option value="text" selected>Text · Kontrast und Schärfung</option><option value="bw">Schwarzweiß · schwarze Schrift</option></select>
+<label for="exposure">Belichtung: <output id="exposureValue">−1</output></label>
+<input id="exposure" type="range" min="-4" max="2" step="0.5" value="-1">
+<small>Nach links dunkler, nach rechts heller. Bei weißem Bild zuerst dunkler stellen.</small>
+<label for="shutter">Belichtungszeit</label>
+<select id="shutter"><option value="0">Automatisch</option><option value="20000">1/50 s</option><option value="10000">1/100 s</option><option value="5000">1/200 s</option><option value="2000">1/500 s</option><option value="1000">1/1000 s</option><option value="500">1/2000 s</option></select>
+<small id="shutterHelp">Für sehr helle Bildschirme eine kurze Zeit testen. Bei fester Zeit wirkt der Belichtungsregler nicht.</small>
+<button id="applySettings">Einstellungen übernehmen</button>
+<p id="settingsStatus" role="status"></p>
+</div>
+<p><small id="focusHelp">Camera Rev 1.3 hat keinen Autofokus. Abstand und Ausrichtung anpassen, bis Buchstaben scharf sind. Filter können Unschärfe oder vollständig weiße Flächen nicht reparieren.</small></p>
+<button id="liveToggle" disabled>Live-Vorschau starten</button>
+<p id="liveStatus" role="status"></p>
+<figure id="liveFigure" hidden><img id="liveImage" alt="Live-Bild der Kamera"><figcaption><small>Live · 640 × 480 · ohne KI-Analyse. Für Fotos pausiert das Video kurz.</small></figcaption></figure>
+<button id="capture" disabled>Foto aufnehmen und analysieren</button>
+<button id="preview" disabled>Nur Foto anzeigen</button>
+<figure id="previewFigure" hidden style="margin:16px 0">
+<img id="previewImage" alt="Letztes Kamerabild" style="display:block;width:100%;border-radius:8px">
+<figcaption><small>Letztes Vorschaubild · ohne KI-Analyse</small></figcaption>
+</figure>
+<p id="imageWarning" class="notice" role="status"></p>
+<pre id="answer" style="white-space:pre-wrap;font:inherit;overflow-wrap:anywhere"></pre>
 <small>Der Code gilt fünf Minuten und nur für eine Kopplung. Ein neuer Code ersetzt den alten. Beim Schließen des Handy-Browsers wechselt die Anzeige direkt, bei einer unterbrochenen Netzwerkverbindung spätestens nach 15 Sekunden auf „getrennt“. Die Uhr wird als verbunden angezeigt, solange ihre App geöffnet ist. Die Kopplung bleibt bis zu 24 Stunden gültig.</small>
 </main>
 <script>
 const button=document.querySelector('#generate'),code=document.querySelector('#code'),status=document.querySelector('#status'),connection=document.querySelector('#connection');let timer;
+const capture=document.querySelector('#capture'),cameraStatus=document.querySelector('#cameraStatus'),answer=document.querySelector('#answer');let submitting=false;
+const preview=document.querySelector('#preview'),previewFigure=document.querySelector('#previewFigure'),previewImage=document.querySelector('#previewImage');let previewId=null;
+const imageMode=document.querySelector('#imageMode'),exposure=document.querySelector('#exposure'),exposureValue=document.querySelector('#exposureValue'),shutter=document.querySelector('#shutter'),applySettings=document.querySelector('#applySettings'),settingsStatus=document.querySelector('#settingsStatus'),imageWarning=document.querySelector('#imageWarning');let settingsLoaded=false,lastCameraModel=null;
+const liveToggle=document.querySelector('#liveToggle'),liveFigure=document.querySelector('#liveFigure'),liveImage=document.querySelector('#liveImage'),liveStatus=document.querySelector('#liveStatus');let liveSession=null,liveTimer=null,liveChanging=false;
+function showExposure(){exposureValue.textContent=exposure.value;exposure.disabled=shutter.value!=='0';}
+exposure.addEventListener('input',showExposure);shutter.addEventListener('change',showExposure);
+applySettings.addEventListener('click',async()=>{applySettings.disabled=true;try{const response=await fetch('/host/camera/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:imageMode.value,ev:Number(exposure.value),shutter:Number(shutter.value)})});if(!response.ok)throw new Error('Einstellungen konnten nicht gespeichert werden.');settingsStatus.textContent='Übernommen. Gilt für Live-Bild und neue Kameraaufnahmen, auch von der Uhr.';}catch(error){settingsStatus.textContent=error.message;}finally{applySettings.disabled=false;}});
+function resetLive(){clearInterval(liveTimer);liveSession=null;liveImage.removeAttribute('src');liveFigure.hidden=true;liveToggle.textContent='Live-Vorschau starten';}
+async function stopLive(){const session=liveSession;resetLive();if(session)await fetch('/host/live/'+session+'/stop',{method:'POST'}).catch(()=>{});liveStatus.textContent='Live-Vorschau beendet.';}
+async function renewLive(){if(!liveSession)return;try{const response=await fetch('/host/live/'+liveSession+'/keepalive',{method:'POST'});if(!response.ok)throw new Error();}catch{resetLive();liveStatus.textContent='Live-Verbindung beendet. Erneut starten.';}}
+liveToggle.addEventListener('click',async()=>{if(liveChanging)return;liveChanging=true;liveToggle.disabled=true;try{if(liveSession){await stopLive();}else{const response=await fetch('/host/live/start',{method:'POST'});const result=await response.json();if(!response.ok)throw new Error(result.detail||'Live-Start fehlgeschlagen.');liveSession=result.session;liveImage.src='/host/live/'+liveSession+'/stream';liveFigure.hidden=false;liveStatus.textContent='Kamera startet …';liveToggle.textContent='Live-Vorschau stoppen';liveTimer=setInterval(renewLive,5000);}}catch(error){liveStatus.textContent=error.message;}finally{liveChanging=false;refreshConnection();}});
+window.addEventListener('pagehide',()=>{if(liveSession)navigator.sendBeacon('/host/live/'+liveSession+'/stop','');});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&liveSession)stopLive();});
+function updateLive(state){const esp=state.camera?.model==='xiao_esp32s3';if(lastCameraModel!==state.camera?.model){lastCameraModel=state.camera?.model;settingsLoaded=false;}document.querySelector('#cameraName').textContent=state.camera?.name||'Kamera';shutter.disabled=esp;exposure.min=esp?'-2':'-4';exposure.step=esp?'1':'0.5';document.querySelector('#shutterHelp').textContent=esp?'ESP32: automatische Belichtungszeit; der Regler verwendet Sensorstufen von −2 bis +2.':'Für sehr helle Bildschirme eine kurze Zeit testen. Bei fester Zeit wirkt der Belichtungsregler nicht.';document.querySelector('#focusHelp').textContent=esp?'XIAO Sense: Abstand und Ausrichtung anpassen, bis die Schrift scharf ist. Die Firmware verwendet keinen Autofokus.':'Camera Rev 1.3 hat keinen Autofokus. Abstand und Ausrichtung anpassen, bis Buchstaben scharf sind.';if(!settingsLoaded&&state.settings){imageMode.value=state.settings.mode;exposure.value=state.settings.ev;shutter.value=String(state.settings.shutter);settingsLoaded=true;showExposure();}liveToggle.disabled=liveChanging||(!liveSession&&!state.camera?.online);imageWarning.textContent=state.preview_warning||'';if(liveSession){if(!state.live?.active){resetLive();liveStatus.textContent='Live-Vorschau beendet.';}else{const receiving=state.live.receiving;liveFigure.hidden=!receiving;liveStatus.textContent=state.live.error||state.live.warning||(state.camera.busy?'Live pausiert für Fotoaufnahme / Analyse …':receiving?'Live verbunden · ohne Analyse':'Warte auf aktuelle Live-Bilder …');}}}
+previewImage.addEventListener('load',()=>{previewFigure.hidden=false;});
+previewImage.addEventListener('error',()=>{previewFigure.hidden=true;previewId=null;});
+function updateCamera(state){updateLive(state);const camera=state.camera;capture.disabled=preview.disabled=submitting||state.analysis_busy||!camera||!camera.online||camera.busy;cameraStatus.textContent=!camera||!camera.online?'Kamera getrennt. Kameragerät starten bzw. koppeln.':state.scan_analysis?.state==='running'?'Gespeicherter Scan wird analysiert …':camera.message;answer.textContent=state.result?.answer||'';if(state.preview_id!==previewId){previewId=state.preview_id||null;previewFigure.hidden=true;if(previewId){previewImage.src='/host/preview/'+encodeURIComponent(previewId);}else{previewImage.removeAttribute('src');}}}
+async function requestPhoto(path){submitting=true;capture.disabled=preview.disabled=true;cameraStatus.textContent='Aufnahme wird angefordert …';try{const response=await fetch(path,{method:'POST'});const result=await response.json();if(!response.ok)throw new Error(result.detail||'Aufnahme fehlgeschlagen.');}catch(error){cameraStatus.textContent=error.message;}finally{submitting=false;setTimeout(refreshConnection,1500);}}
+capture.addEventListener('click',()=>requestPhoto('/host/capture'));
+preview.addEventListener('click',()=>requestPhoto('/host/preview'));
 async function refreshConnection(){
-try{const response=await fetch('/host/status',{cache:'no-store'});if(!response.ok)throw new Error();const state=await response.json();connection.classList.toggle('online',state.connected);connection.textContent=state.connected?(state.devices===1?'1 Gerät verbunden':`${state.devices} Geräte verbunden`):'Kein Gerät verbunden';if(!state.code_active&&code.textContent){code.textContent='';clearInterval(timer);status.textContent='Code verwendet oder abgelaufen. Bei Bedarf neuen Code erzeugen.';}}
-catch{connection.classList.remove('online');connection.textContent='Verbindungsstatus derzeit nicht verfügbar.';}
+try{const response=await fetch('/host/status',{cache:'no-store'});if(!response.ok)throw new Error();const state=await response.json();updateCamera(state);connection.classList.toggle('online',state.connected);connection.textContent=state.connected?(state.devices===1?'1 Gerät verbunden':`${state.devices} Geräte verbunden`):'Kein Gerät verbunden';if(!state.code_active&&code.textContent){code.textContent='';clearInterval(timer);status.textContent='Code verwendet oder abgelaufen. Bei Bedarf neuen Code erzeugen.';}}
+catch{capture.disabled=preview.disabled=true;cameraStatus.textContent='PC nicht erreichbar.';connection.classList.remove('online');connection.textContent='Verbindungsstatus derzeit nicht verfügbar.';}
 }
 button.addEventListener('click',async()=>{
 button.disabled=true;clearInterval(timer);code.textContent='';status.textContent='Code wird erzeugt …';

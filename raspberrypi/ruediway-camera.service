@@ -1,0 +1,13 @@
+[Unit]
+Description=RuediWay Raspberry Pi camera
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/RuediWay/raspberrypi/camera_client.py run
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+UMask=0077
+
+[Install]
+WantedBy=default.target
